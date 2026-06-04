@@ -1,0 +1,6 @@
+{
+  "name": "检测不确定度计算与报告生成器",
+  "description": "快速生成并管理检测项目的不确定度。支持多个水平浓度参数设置、自动合成相对及扩展不确定度、报告合并生成与一键导出Excel。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

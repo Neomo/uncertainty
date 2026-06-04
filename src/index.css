@@ -1,0 +1,74 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..700;1,400..700&family=Lora:ital,wght@0,400..700;1,400..700&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-serif: "Playfair Display", "Lora", Georgia, serif;
+  --font-sans: "Inter", "Space Grotesk", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+  
+  --color-sage-50: #f4f6f4;
+  --color-sage-100: #e7ece8;
+  --color-sage-200: #d2dbd4;
+  --color-sage-500: #6d7f70;
+  --color-sage-600: #5D6D5F;
+  --color-sage-700: #49564b;
+  --color-sage-800: #3c473e;
+  --color-sage-900: #29302b;
+  
+  --color-editorial-bg: #FAF9F6;
+  --color-editorial-sand: #F2EFE9;
+}
+
+/* Custom editorial transitions and aesthetics */
+body {
+  background-color: var(--color-editorial-bg);
+  color: #1A1A1A;
+}
+
+@layer utilities {
+  @media print {
+    /* Hide headers, menus, tabs and footer during printing */
+    header, 
+    main > div:first-child,
+    #backup-data-container,
+    #project-list-container,
+    #parameter-config-container,
+    #report-generator-container > div:first-child,
+    footer,
+    button {
+      display: none !important;
+    }
+    
+    /* Make the full table stand alone */
+    body {
+      background-color: white !important;
+      color: black !important;
+      font-size: 10pt !important;
+    }
+    
+    #print-report-area {
+      border: none !important;
+      box-shadow: none !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      width: 100% !important;
+      position: absolute;
+      left: 0;
+      top: 0;
+    }
+    
+    /* Auto fit cell widths */
+    th, td {
+      border: 1px solid #cbd5e1 !important;
+      padding: 6px !important;
+      font-size: 8pt !important;
+    }
+    
+    @page {
+      margin: 1cm;
+      size: landscape; /* Medical sheets look best in landscape */
+    }
+  }
+}
+
+
