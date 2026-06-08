@@ -7,10 +7,29 @@ export interface Project {
   id: string; // 唯一ID
   code: string; // 检测项目简称, 如 FT3, FT4
   name: string; // 检测项目中文名, 如 游离三碘甲状腺原氨酸
+  unit: string; // 单位代码, 如 ng/ml (从项目配置带入)
   instrument: string; // 检测仪器, 如 SIEMENSBN II, 罗氏Cobas
   method: string; // 检测方法, 如 化学发光免疫分析
   interference: string; // 干扰因素, 如 严重溶血标本
   traceability: string; // 校准品溯源性, 如 ERM-DA470k/I
+}
+
+export interface DictInstrument {
+  id: string;
+  code: string; // 唯一代码
+  name: string; // 检测仪器（仪器详情）
+}
+
+export interface DictProject {
+  id: string;
+  code: string; // 唯一代码
+  name: string; // 检测项目中文名称
+}
+
+export interface DictUnit {
+  id: string;
+  code: string; // 唯一代码
+  description?: string; // 单位说明（可不填）
 }
 
 export interface Parameter {

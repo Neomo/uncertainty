@@ -4,24 +4,37 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Project, Parameter } from './types';
-import { INITIAL_PROJECTS, INITIAL_PARAMETERS } from './utils/sampleData';
+import { Project, Parameter, DictInstrument, DictProject, DictUnit } from './types';
+import { 
+  INITIAL_PROJECTS, 
+  INITIAL_PARAMETERS, 
+  INITIAL_DICT_INSTRUMENTS, 
+  INITIAL_DICT_PROJECTS, 
+  INITIAL_DICT_UNITS 
+} from './utils/sampleData';
+import DictionaryConfig from './components/DictionaryConfig';
 import ProjectList from './components/ProjectList';
 import ParameterConfig from './components/ParameterConfig';
 import ReportGenerator from './components/ReportGenerator';
 import BackupData from './components/BackupData';
-import { Activity, ShieldCheck, Database, FileSpreadsheet, Layers, Sliders, Info, HardDriveUpload } from 'lucide-react';
+import { Activity, ShieldCheck, Database, FileSpreadsheet, Layers, Sliders, Info, HardDriveUpload, Library } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [parameters, setParameters] = useState<Parameter[]>([]);
-  const [activeTab, setActiveTab] = useState<'projects' | 'parameters' | 'report' | 'backup'>('projects');
+  const [dictInstruments, setDictInstruments] = useState<DictInstrument[]>([]);
+  const [dictProjects, setDictProjects] = useState<DictProject[]>([]);
+  const [dictUnits, setDictUnits] = useState<DictUnit[]>([]);
+  const [activeTab, setActiveTab] = useState<'dictionary' | 'projects' | 'parameters' | 'report' | 'backup'>('projects');
 
   // Load from LocalStorage on mount
   useEffect(() => {
     const storedProjects = localStorage.getItem('unc_projects');
     const storedParams = localStorage.getItem('unc_parameters');
+    const storedDictInstruments = localStorage.getItem('unc_dict_instruments');
+    const storedDictProjects = localStorage.getItem('unc_dict_projects');
+    const storedDictUnits = localStorage.getItem('unc_dict_units');
 
     if (storedProjects) {
       try {
@@ -44,6 +57,39 @@ export default function App() {
     } else {
       setParameters(INITIAL_PARAMETERS);
     }
+
+    if (storedDictInstruments) {
+      try {
+        setDictInstruments(JSON.parse(storedDictInstruments));
+      } catch (err) {
+        console.error('Failed to parse dict instruments:', err);
+        setDictInstruments(INITIAL_DICT_INSTRUMENTS);
+      }
+    } else {
+      setDictInstruments(INITIAL_DICT_INSTRUMENTS);
+    }
+
+    if (storedDictProjects) {
+      try {
+        setDictProjects(JSON.parse(storedDictProjects));
+      } catch (err) {
+        console.error('Failed to parse dict projects:', err);
+        setDictProjects(INITIAL_DICT_PROJECTS);
+      }
+    } else {
+      setDictProjects(INITIAL_DICT_PROJECTS);
+    }
+
+    if (storedDictUnits) {
+      try {
+        setDictUnits(JSON.parse(storedDictUnits));
+      } catch (err) {
+        console.error('Failed to parse dict units:', err);
+        setDictUnits(INITIAL_DICT_UNITS);
+      }
+    } else {
+      setDictUnits(INITIAL_DICT_UNITS);
+    }
   }, []);
 
   // Sync back to localstorage on projects update
@@ -58,17 +104,38 @@ export default function App() {
     localStorage.setItem('unc_parameters', JSON.stringify(updatedParams));
   };
 
+  // Sync back to localstorage for dictionaries
+  const saveDictInstrumentsToStorage = (updatedList: DictInstrument[]) => {
+    setDictInstruments(updatedList);
+    localStorage.setItem('unc_dict_instruments', JSON.stringify(updatedList));
+  };
+
+  const saveDictProjectsToStorage = (updatedList: DictProject[]) => {
+    setDictProjects(updatedList);
+    localStorage.setItem('unc_dict_projects', JSON.stringify(updatedList));
+  };
+
+  const saveDictUnitsToStorage = (updatedList: DictUnit[]) => {
+    setDictUnits(updatedList);
+    localStorage.setItem('unc_dict_units', JSON.stringify(updatedList));
+  };
+
   // State actions: Project Create
-  const handleAddProject = (newProj: Omit<Project, 'id'>) => {
-    const id = `proj_${Date.now()}`;
-    const payload: Project = { ...newProj, id };
-    const newList = [...projects, payload];
+  const handleAddProject = (newProjOrArray: Omit<Project, 'id'> | Omit<Project, 'id'>[]) => {
+    const toAdd = Array.isArray(newProjOrArray) ? newProjOrArray : [newProjOrArray];
+    const newPayloads = toAdd.map((item, index) => ({
+      ...item,
+      id: `proj_${Date.now()}_${index}_${Math.random().toString(36).substring(2, 7)}`
+    }));
+    const newList = [...projects, ...newPayloads];
     saveProjectsToStorage(newList);
   };
 
   // State actions: Project Update
-  const handleUpdateProject = (updatedProj: Project) => {
-    const newList = projects.map((p) => (p.id === updatedProj.id ? updatedProj : p));
+  const handleUpdateProject = (updatedProjOrArray: Project | Project[]) => {
+    const toUpdate = Array.isArray(updatedProjOrArray) ? updatedProjOrArray : [updatedProjOrArray];
+    const updateMap = new Map(toUpdate.map((p) => [p.id, p]));
+    const newList = projects.map((p) => (updateMap.has(p.id) ? updateMap.get(p.id)! : p));
     saveProjectsToStorage(newList);
   };
 
@@ -81,16 +148,39 @@ export default function App() {
   };
 
   // State actions: Parameter Create
-  const handleAddParameter = (newParam: Omit<Parameter, 'id'>) => {
-    const id = `param_${Date.now()}`;
-    const payload: Parameter = { ...newParam, id };
-    const newList = [...parameters, payload];
+  const handleAddParameter = (
+    newParamOrArray: Omit<Parameter, 'id'> | Omit<Parameter, 'id'>[],
+    afterId?: string
+  ) => {
+    const toAdd = Array.isArray(newParamOrArray) ? newParamOrArray : [newParamOrArray];
+    const newPayloads = toAdd.map((item, index) => ({
+      ...item,
+      id: `param_${Date.now()}_${index}_${Math.random().toString(36).substring(2, 7)}`
+    }));
+
+    let newList: Parameter[];
+    if (afterId) {
+      const index = parameters.findIndex((p) => p.id === afterId);
+      if (index !== -1) {
+        newList = [
+          ...parameters.slice(0, index + 1),
+          ...newPayloads,
+          ...parameters.slice(index + 1)
+        ];
+      } else {
+        newList = [...parameters, ...newPayloads];
+      }
+    } else {
+      newList = [...parameters, ...newPayloads];
+    }
     saveParametersToStorage(newList);
   };
 
   // State actions: Parameter Update
-  const handleUpdateParameter = (updatedParam: Parameter) => {
-    const newList = parameters.map((p) => (p.id === updatedParam.id ? updatedParam : p));
+  const handleUpdateParameter = (updatedParamOrArray: Parameter | Parameter[]) => {
+    const toUpdate = Array.isArray(updatedParamOrArray) ? updatedParamOrArray : [updatedParamOrArray];
+    const updateMap = new Map(toUpdate.map((p) => [p.id, p]));
+    const newList = parameters.map((p) => (updateMap.has(p.id) ? updateMap.get(p.id)! : p));
     saveParametersToStorage(newList);
   };
 
@@ -98,6 +188,37 @@ export default function App() {
   const handleDeleteParameter = (paramId: string) => {
     const newList = parameters.filter((p) => p.id !== paramId);
     saveParametersToStorage(newList);
+  };
+
+  // Dictionary management actions
+  const handleAddDictInstrument = (newInst: Omit<DictInstrument, 'id'>) => {
+    const payload = { ...newInst, id: `inst_${Date.now()}` };
+    saveDictInstrumentsToStorage([...dictInstruments, payload]);
+  };
+  
+  const handleDeleteDictInstrument = (id: string) => {
+    const newList = dictInstruments.filter((x) => x.id !== id);
+    saveDictInstrumentsToStorage(newList);
+  };
+
+  const handleAddDictProject = (newProj: Omit<DictProject, 'id'>) => {
+    const payload = { ...newProj, id: `dict_proj_${Date.now()}` };
+    saveDictProjectsToStorage([...dictProjects, payload]);
+  };
+
+  const handleDeleteDictProject = (id: string) => {
+    const newList = dictProjects.filter((x) => x.id !== id);
+    saveDictProjectsToStorage(newList);
+  };
+
+  const handleAddDictUnit = (newUnit: Omit<DictUnit, 'id'>) => {
+    const payload = { ...newUnit, id: `unit_${Date.now()}` };
+    saveDictUnitsToStorage([...dictUnits, payload]);
+  };
+
+  const handleDeleteDictUnit = (id: string) => {
+    const newList = dictUnits.filter((x) => x.id !== id);
+    saveDictUnitsToStorage(newList);
   };
 
   // State actions: Backup import
@@ -110,6 +231,9 @@ export default function App() {
   const handleResetToSample = () => {
     saveProjectsToStorage(INITIAL_PROJECTS);
     saveParametersToStorage(INITIAL_PARAMETERS);
+    saveDictInstrumentsToStorage(INITIAL_DICT_INSTRUMENTS);
+    saveDictProjectsToStorage(INITIAL_DICT_PROJECTS);
+    saveDictUnitsToStorage(INITIAL_DICT_UNITS);
   };
 
   // State actions: Clear database
@@ -158,6 +282,19 @@ export default function App() {
         {/* Navigation Tabs bar - Editorial Style */}
         <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 border-b border-black/10 pb-2">
           <nav className="flex flex-wrap gap-x-8 gap-y-2 text-[11px] uppercase tracking-[0.2em] font-semibold">
+            {/* Tab 0: Dictionary */}
+            <button
+              id="tab-dictionary"
+              onClick={() => setActiveTab('dictionary')}
+              className={`pb-2.5 transition-all cursor-pointer border-b ${
+                activeTab === 'dictionary'
+                  ? 'text-[#5D6D5F] border-[#5D6D5F]'
+                  : 'text-slate-400 border-transparent hover:text-slate-700'
+              }`}
+            >
+              〇 字典页面
+            </button>
+
             {/* Tab 1: Projects */}
             <button
               id="tab-projects"
@@ -228,6 +365,20 @@ export default function App() {
               transition={{ duration: 0.12 }}
               className="h-full"
             >
+              {activeTab === 'dictionary' && (
+                <DictionaryConfig
+                  instruments={dictInstruments}
+                  projects={dictProjects}
+                  units={dictUnits}
+                  onAddInstrument={handleAddDictInstrument}
+                  onDeleteInstrument={handleDeleteDictInstrument}
+                  onAddDictProject={handleAddDictProject}
+                  onDeleteDictProject={handleDeleteDictProject}
+                  onAddDictUnit={handleAddDictUnit}
+                  onDeleteDictUnit={handleDeleteDictUnit}
+                />
+              )}
+
               {activeTab === 'projects' && (
                 <ProjectList
                   projects={projects}
@@ -235,6 +386,9 @@ export default function App() {
                   onAddProject={handleAddProject}
                   onUpdateProject={handleUpdateProject}
                   onDeleteProject={handleDeleteProject}
+                  dictInstruments={dictInstruments}
+                  dictProjects={dictProjects}
+                  dictUnits={dictUnits}
                 />
               )}
 
