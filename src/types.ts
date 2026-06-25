@@ -12,6 +12,7 @@ export interface Project {
   method: string; // 检测方法, 如 化学发光免疫分析
   interference: string; // 干扰因素, 如 严重溶血标本
   traceability: string; // 校准品溯源性, 如 ERM-DA470k/I
+  labLotTestId?: string; // LabLotTestID, 允许为空
 }
 
 export interface DictInstrument {

@@ -4,14 +4,23 @@
  */
 
 import React, { useRef, useState } from 'react';
-import { Project, Parameter } from '../types';
+import { Project, Parameter, DictInstrument, DictProject, DictUnit } from '../types';
 import { Download, Upload, Trash2, RotateCcw, Check, FileJson, AlertTriangle } from 'lucide-react';
 import { INITIAL_PROJECTS, INITIAL_PARAMETERS } from '../utils/sampleData';
 
 interface BackupDataProps {
   projects: Project[];
   parameters: Parameter[];
-  onImportData: (projects: Project[], parameters: Parameter[]) => void;
+  dictInstruments: DictInstrument[];
+  dictProjects: DictProject[];
+  dictUnits: DictUnit[];
+  onImportData: (
+    projects: Project[],
+    parameters: Parameter[],
+    dictInstruments?: DictInstrument[],
+    dictProjects?: DictProject[],
+    dictUnits?: DictUnit[]
+  ) => void;
   onResetToSample: () => void;
   onClearAll: () => void;
 }
@@ -19,6 +28,9 @@ interface BackupDataProps {
 export default function BackupData({
   projects,
   parameters,
+  dictInstruments,
+  dictProjects,
+  dictUnits,
   onImportData,
   onResetToSample,
   onClearAll,
@@ -30,10 +42,13 @@ export default function BackupData({
   // Handle trigger export of state JSON
   const handleExportJSON = () => {
     const dataStr = JSON.stringify({
-      version: '1.0',
+      version: '1.1',
       exportedAt: new Date().toISOString(),
       projects,
       parameters,
+      dictInstruments,
+      dictProjects,
+      dictUnits,
     }, null, 2);
 
     const blob = new Blob([dataStr], { type: 'application/json' });
@@ -46,7 +61,7 @@ export default function BackupData({
     link.click();
     document.body.removeChild(link);
     
-    setSuccessMsg('数据已成功导出为 JSON 文件！');
+    setSuccessMsg('数据已成功导出为 JSON 文件 (含词典库)！');
     setTimeout(() => setSuccessMsg(''), 3000);
   };
 
@@ -63,9 +78,20 @@ export default function BackupData({
           throw new Error('导入文件格式不正确，缺少 projects 或 parameters 数组字段');
         }
 
-        if (window.confirm(`确定要导入这 ${parsed.projects.length} 个项目与 ${parsed.parameters.length} 组参数吗？将会替换您当前的全部数据！`)) {
-          onImportData(parsed.projects, parsed.parameters);
-          setSuccessMsg('数据导入成功，已更新当前配置！');
+        const hasDetails = Array.isArray(parsed.dictInstruments) || Array.isArray(parsed.dictProjects) || Array.isArray(parsed.dictUnits);
+        const confirmMsg = hasDetails 
+          ? `确定要导入这 ${parsed.projects.length} 个项目、${parsed.parameters.length} 组参数以及关联字典常数吗？将会替换您当前的全部数据！`
+          : `确定要导入这 ${parsed.projects.length} 个项目与 ${parsed.parameters.length} 组参数吗？将会替换您当前的全部数据！`;
+
+        if (window.confirm(confirmMsg)) {
+          onImportData(
+            parsed.projects,
+            parsed.parameters,
+            Array.isArray(parsed.dictInstruments) ? parsed.dictInstruments : undefined,
+            Array.isArray(parsed.dictProjects) ? parsed.dictProjects : undefined,
+            Array.isArray(parsed.dictUnits) ? parsed.dictUnits : undefined
+          );
+          setSuccessMsg('数据导入成功，包括仪器/项目字典库均已成功备份恢复！');
           setErrorMsg('');
           if (fileInputRef.current) {
             fileInputRef.current.value = '';

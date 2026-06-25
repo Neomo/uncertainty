@@ -137,6 +137,20 @@ export default function App() {
     const updateMap = new Map(toUpdate.map((p) => [p.id, p]));
     const newList = projects.map((p) => (updateMap.has(p.id) ? updateMap.get(p.id)! : p));
     saveProjectsToStorage(newList);
+
+    // Synchronize parameters' unit if their associated project's unit has been modified
+    let anyParamUpdated = false;
+    const updatedParams = parameters.map((param) => {
+      const parentProj = updateMap.get(param.projectId);
+      if (parentProj && parentProj.unit !== param.unit) {
+        anyParamUpdated = true;
+        return { ...param, unit: parentProj.unit };
+      }
+      return param;
+    });
+    if (anyParamUpdated) {
+      saveParametersToStorage(updatedParams);
+    }
   };
 
   // State actions: Project Delete (cascading deletes any levels attached to this project)
@@ -201,6 +215,13 @@ export default function App() {
     saveDictInstrumentsToStorage(newList);
   };
 
+  const handleUpdateDictInstrument = (id: string, newName: string) => {
+    const newList = dictInstruments.map((item) =>
+      item.id === id ? { ...item, name: newName } : item
+    );
+    saveDictInstrumentsToStorage(newList);
+  };
+
   const handleAddDictProject = (newProj: Omit<DictProject, 'id'>) => {
     const payload = { ...newProj, id: `dict_proj_${Date.now()}` };
     saveDictProjectsToStorage([...dictProjects, payload]);
@@ -209,6 +230,26 @@ export default function App() {
   const handleDeleteDictProject = (id: string) => {
     const newList = dictProjects.filter((x) => x.id !== id);
     saveDictProjectsToStorage(newList);
+  };
+
+  const handleUpdateDictProject = (id: string, newName: string) => {
+    const targetDictProj = dictProjects.find((dp) => dp.id === id);
+    if (!targetDictProj) return;
+
+    // 1. Update dict in storage
+    const newList = dictProjects.map((item) =>
+      item.id === id ? { ...item, name: newName } : item
+    );
+    saveDictProjectsToStorage(newList);
+
+    // 2. Cascade updating of all created projects having the matching project code
+    const updatedProjects = projects.map((p) => {
+      if (p.code.toLowerCase().trim() === targetDictProj.code.toLowerCase().trim()) {
+        return { ...p, name: newName };
+      }
+      return p;
+    });
+    saveProjectsToStorage(updatedProjects);
   };
 
   const handleAddDictUnit = (newUnit: Omit<DictUnit, 'id'>) => {
@@ -221,10 +262,32 @@ export default function App() {
     saveDictUnitsToStorage(newList);
   };
 
+  const handleUpdateDictUnit = (id: string, newDesc: string) => {
+    const newList = dictUnits.map((item) =>
+      item.id === id ? { ...item, description: newDesc } : item
+    );
+    saveDictUnitsToStorage(newList);
+  };
+
   // State actions: Backup import
-  const handleImportData = (importedProjects: Project[], importedParameters: Parameter[]) => {
+  const handleImportData = (
+    importedProjects: Project[],
+    importedParameters: Parameter[],
+    importedDictInstruments?: DictInstrument[],
+    importedDictProjects?: DictProject[],
+    importedDictUnits?: DictUnit[]
+  ) => {
     saveProjectsToStorage(importedProjects);
     saveParametersToStorage(importedParameters);
+    if (importedDictInstruments) {
+      saveDictInstrumentsToStorage(importedDictInstruments);
+    }
+    if (importedDictProjects) {
+      saveDictProjectsToStorage(importedDictProjects);
+    }
+    if (importedDictUnits) {
+      saveDictUnitsToStorage(importedDictUnits);
+    }
   };
 
   // State actions: Restore database back to demo state
@@ -372,10 +435,13 @@ export default function App() {
                   units={dictUnits}
                   onAddInstrument={handleAddDictInstrument}
                   onDeleteInstrument={handleDeleteDictInstrument}
+                  onUpdateInstrument={handleUpdateDictInstrument}
                   onAddDictProject={handleAddDictProject}
                   onDeleteDictProject={handleDeleteDictProject}
+                  onUpdateDictProject={handleUpdateDictProject}
                   onAddDictUnit={handleAddDictUnit}
                   onDeleteDictUnit={handleDeleteDictUnit}
+                  onUpdateDictUnit={handleUpdateDictUnit}
                 />
               )}
 
@@ -399,6 +465,7 @@ export default function App() {
                   onAddParameter={handleAddParameter}
                   onUpdateParameter={handleUpdateParameter}
                   onDeleteParameter={handleDeleteParameter}
+                  dictInstruments={dictInstruments}
                 />
               )}
 
@@ -406,6 +473,7 @@ export default function App() {
                 <ReportGenerator
                   projects={projects}
                   parameters={parameters}
+                  dictInstruments={dictInstruments}
                 />
               )}
 
@@ -413,6 +481,9 @@ export default function App() {
                 <BackupData
                   projects={projects}
                   parameters={parameters}
+                  dictInstruments={dictInstruments}
+                  dictProjects={dictProjects}
+                  dictUnits={dictUnits}
                   onImportData={handleImportData}
                   onResetToSample={handleResetToSample}
                   onClearAll={handleClearAll}

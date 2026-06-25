@@ -4,9 +4,9 @@
  */
 
 import React, { useState } from 'react';
-import { Project, Parameter, CalculatedParameter } from '../types';
+import { Project, Parameter, CalculatedParameter, DictInstrument } from '../types';
 import { calculateParameter } from '../utils/calculations';
-import { Plus, Edit2, Trash2, Sliders, Check, AlertCircle, X, HelpCircle, Copy, Upload } from 'lucide-react';
+import { Plus, Edit2, Trash2, Sliders, Check, AlertCircle, X, HelpCircle, Copy, Upload, ChevronDown, ChevronUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 
@@ -16,6 +16,7 @@ interface ParameterConfigProps {
   onAddParameter: (param: Omit<Parameter, 'id'> | Omit<Parameter, 'id'>[], afterId?: string) => void;
   onUpdateParameter: (param: Parameter | Parameter[]) => void;
   onDeleteParameter: (paramId: string) => void;
+  dictInstruments?: DictInstrument[];
 }
 
 export default function ParameterConfig({
@@ -24,6 +25,7 @@ export default function ParameterConfig({
   onAddParameter,
   onUpdateParameter,
   onDeleteParameter,
+  dictInstruments = [],
 }: ParameterConfigProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; projectName: string; level: string } | null>(null);
@@ -52,9 +54,57 @@ export default function ParameterConfig({
     value: string;
   } | null>(null);
 
+  // Filter & Group Controls
+  const [selectedInstrument, setSelectedInstrument] = useState<string | null>(null);
+  const [groupByInstrument, setGroupByInstrument] = useState<boolean>(false);
+  const [isGuideCollapsed, setIsGuideCollapsed] = useState(false);
+
+  // Helper of level status style with distinct background colors for each level
+  const getLevelStyle = (level: string) => {
+    const norm = String(level).trim().toLowerCase().replace(/^l/i, '');
+    if (norm === '1') {
+      return 'bg-[#E3F2FD] text-[#0D47A1] border-[#BBDEFB] font-bold';
+    } else if (norm === '2') {
+      return 'bg-[#E8F5E9] text-[#1B5E20] border-[#C8E6C9] font-bold';
+    } else if (norm === '3') {
+      return 'bg-[#F3E5F5] text-[#4A148C] border-[#E1BEE7] font-bold';
+    } else {
+      return 'bg-[#FFF3E0] text-[#E65100] border-[#FFE0B2] font-bold';
+    }
+  };
+
+  // Get all unique instruments existing in current project list
+  const uniqueInstruments = Array.from(new Set(projects.map((p) => p.instrument?.trim()).filter(Boolean))) as string[];
+
   // Auto calculate the parameters to display in the table
   const displayParams = isBatchEditing ? batchParams : parameters;
-  const calculatedList: CalculatedParameter[] = displayParams.map((p) => calculateParameter(p));
+  const calculatedList: CalculatedParameter[] = displayParams.map((p) => {
+    const calc = calculateParameter(p);
+    const proj = projects.find((proj) => proj.id === p.projectId);
+    if (proj) {
+      calc.unit = proj.unit;
+    }
+    return calc;
+  });
+
+  // Filter display list based on selected instrument
+  const filteredCalculatedList = selectedInstrument
+    ? calculatedList.filter((param) => {
+        const proj = projects.find((p) => p.id === param.projectId);
+        return (proj?.instrument || '').trim().toLowerCase() === selectedInstrument.trim().toLowerCase();
+      })
+    : calculatedList;
+
+  // Grouped calculated parameters mapping for group display mode
+  const groupedCalculatedList: { [instrument: string]: CalculatedParameter[] } = {};
+  filteredCalculatedList.forEach((param) => {
+    const proj = projects.find((p) => p.id === param.projectId);
+    const inst = (proj?.instrument || '').trim() || '未指定仪器';
+    if (!groupedCalculatedList[inst]) {
+      groupedCalculatedList[inst] = [];
+    }
+    groupedCalculatedList[inst].push(param);
+  });
 
   // Allowed projects (do not have any configured parameters yet)
   const allowedProjects = projects.filter((p) => !parameters.some((param) => param.projectId === p.id));
@@ -199,6 +249,11 @@ export default function ParameterConfig({
         }
 
         // Find relevant columns dynamically
+        const labLotTestIdIdx = headers.findIndex((h) => h && (
+          String(h).trim().toLowerCase() === 'lablottestid' ||
+          String(h).trim().toLowerCase() === 'lablottest_id' ||
+          String(h).trim().toLowerCase() === 'testid'
+        ));
         const instrumentIdx = headers.findIndex((h) => h && (String(h).trim() === '仪器' || String(h).trim() === '检测仪器'));
         const codeIdx = headers.findIndex((h) => h && (String(h).trim() === '项目代号' || String(h).trim() === '项目代码' || String(h).trim() === '项目简称'));
         const levelIdx = headers.findIndex((h) => h && (String(h).trim() === '水平' || String(h).trim() === '水平代号' || String(h).trim() === '浓度水平'));
@@ -225,13 +280,14 @@ export default function ParameterConfig({
           const row = rows[i];
           if (!row || row.length === 0) continue;
 
+          const labLotTestIdVal = labLotTestIdIdx !== -1 ? String(row[labLotTestIdIdx] || '').trim() : '';
           const instrumentVal = String(row[instrumentIdx] || '').trim();
           const codeVal = String(row[codeIdx] || '').trim();
           const levelVal = String(row[levelIdx] || '').trim();
           const meanRaw = row[meanIdx];
           const qccvRaw = row[qccvIdx];
 
-          if (!instrumentVal && !codeVal && !levelVal) continue;
+          if (!labLotTestIdVal && !instrumentVal && !codeVal && !levelVal) continue;
 
           // Parse numeric inputs safely
           const meanVal = meanRaw !== undefined && meanRaw !== null ? parseFloat(String(meanRaw).trim()) : NaN;
@@ -246,14 +302,21 @@ export default function ParameterConfig({
             const proj = projects.find((p) => p.id === param.projectId);
             if (!proj) return false;
 
-            const instMatch = proj.instrument.trim().toLowerCase() === instrumentVal.toLowerCase();
-            const codeMatch = proj.code.trim().toLowerCase() === codeVal.toLowerCase();
-            
             const normalParamLevel = param.level.trim().replace(/^L/i, '').toLowerCase();
             const normalExcelLevel = levelVal.trim().replace(/^L/i, '').toLowerCase();
             const levelMatch = normalParamLevel === normalExcelLevel;
+            if (!levelMatch) return false;
 
-            return instMatch && codeMatch && levelMatch;
+            // Priority 1: match by LabLotTestID if non-empty
+            if (labLotTestIdVal && proj.labLotTestId && proj.labLotTestId.trim().toLowerCase() === labLotTestIdVal.toLowerCase()) {
+              return true;
+            }
+
+            // Priority 2: fallback to Instrument + Project Code matching
+            const instMatch = proj.instrument.trim().toLowerCase() === instrumentVal.toLowerCase();
+            const codeMatch = proj.code.trim().toLowerCase() === codeVal.toLowerCase();
+
+            return instMatch && codeMatch;
           });
 
           if (matchParam) {
@@ -555,6 +618,364 @@ export default function ParameterConfig({
     return proj ? `${proj.code}${proj.instrument ? `-${proj.instrument}` : ''} (${proj.name})` : '未知项目';
   };
 
+  const renderRow = (param: CalculatedParameter) => {
+    const proj = projects.find((p) => p.id === param.projectId);
+    const isSuccess = param.evaluation === '达到要求';
+    return (
+      <tr key={param.id} className="hover:bg-[#FAF9F6] transition-colors border-b border-black/5">
+        {/* Project Code */}
+        <td className="py-4 px-3 font-semibold text-slate-900">
+          <div className="flex flex-col">
+            <span className="font-mono text-sm font-bold text-slate-800 flex items-center gap-1.5 flex-wrap">
+              {proj ? `${proj.code}${proj.instrument ? `-${proj.instrument}` : ''}` : '未知'}
+              {proj?.labLotTestId && (
+                <span className="text-[9px] font-mono font-bold text-emerald-800 bg-emerald-50 px-1 py-0.5 rounded border border-emerald-200/55">
+                  ID: {proj.labLotTestId}
+                </span>
+              )}
+            </span>
+            <span className="text-[10px] text-slate-400 font-serif italic max-w-[110px] truncate" title={proj?.name}>
+              {proj?.name || ''}
+            </span>
+          </div>
+        </td>
+        {/* Unit */}
+        <td className="py-4 px-2 text-center text-slate-605 font-mono text-xs">
+          {param.unit}
+        </td>
+        {/* Level */}
+        <td className="py-4 px-2 text-center text-xs">
+          {isBatchEditing ? (
+            <input
+              type="text"
+              value={param.level || ''}
+              onChange={(e) => handleBatchFieldChange(param.id, 'level', e.target.value)}
+              className="w-14 px-1.5 py-0.5 border border-gray-300 rounded text-center text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#5D6D5F] font-mono font-bold"
+            />
+          ) : inlineEdit?.id === param.id && inlineEdit?.field === 'level' ? (
+            <input
+              type="text"
+              autoFocus
+              value={inlineEdit.value}
+              onChange={(e) => setInlineEdit({ ...inlineEdit, value: e.target.value })}
+              onBlur={() => handleInlineSave(param.id, 'level', inlineEdit.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleInlineSave(param.id, 'level', inlineEdit.value);
+                if (e.key === 'Escape') setInlineEdit(null);
+              }}
+              className="w-14 px-1.5 py-0.5 border border-gray-400 rounded text-center text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#5D6D5F] font-mono font-bold"
+            />
+          ) : (
+            <div
+              onDoubleClick={() => setInlineEdit({ id: param.id, field: 'level', value: param.level || '' })}
+              className="cursor-pointer hover:bg-slate-100 px-1 py-1 rounded border border-dashed border-transparent hover:border-gray-300 transition-all select-none inline-block font-mono"
+              title="双击编辑"
+            >
+              <span className={`px-2 py-0.5 rounded-sm border text-[11px] ${getLevelStyle(param.level)} md:min-w-10 text-center inline-block`}>
+                L{param.level}
+              </span>
+            </div>
+          )}
+        </td>
+        {/* Date Range */}
+        <td className="py-4 px-3 text-center text-slate-450 font-mono text-[10px]">
+          {isBatchEditing ? (
+            <input
+              type="text"
+              value={param.dateRange || ''}
+              onChange={(e) => handleBatchFieldChange(param.id, 'dateRange', e.target.value)}
+              className="w-32 px-1.5 py-0.5 border border-gray-300 rounded text-center text-[10px] tracking-tight bg-white focus:outline-none focus:ring-1 focus:ring-[#5D6D5F] uppercase"
+            />
+          ) : inlineEdit?.id === param.id && inlineEdit?.field === 'dateRange' ? (
+            <input
+              type="text"
+              autoFocus
+              value={inlineEdit.value}
+              onChange={(e) => setInlineEdit({ ...inlineEdit, value: e.target.value })}
+              onBlur={() => handleInlineSave(param.id, 'dateRange', inlineEdit.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleInlineSave(param.id, 'dateRange', inlineEdit.value);
+                if (e.key === 'Escape') setInlineEdit(null);
+              }}
+              className="w-32 px-1.5 py-0.5 border border-gray-400 rounded text-center text-[10px] tracking-tight bg-white focus:outline-none focus:ring-1 focus:ring-[#5D6D5F] uppercase"
+            />
+          ) : (
+            <div
+              onDoubleClick={() => setInlineEdit({ id: param.id, field: 'dateRange', value: param.dateRange || '' })}
+              className="cursor-pointer hover:bg-slate-100 px-1 py-1 rounded border border-dashed border-transparent hover:border-gray-300 transition-all select-none"
+              title="双击编辑"
+            >
+              {param.dateRange}
+            </div>
+          )}
+        </td>
+        {/* Mean */}
+        <td className="py-4 px-2 text-center text-slate-900 font-bold font-mono">
+          {isBatchEditing ? (
+            <input
+              type="number"
+              step="any"
+              value={param.mean !== undefined ? param.mean : ''}
+              onChange={(e) => handleBatchFieldChange(param.id, 'mean', e.target.value)}
+              className="w-20 px-1.5 py-0.5 border border-gray-300 rounded text-center text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#5D6D5F] font-mono font-bold"
+            />
+          ) : inlineEdit?.id === param.id && inlineEdit?.field === 'mean' ? (
+            <input
+              type="number"
+              step="any"
+              autoFocus
+              value={inlineEdit.value}
+              onChange={(e) => setInlineEdit({ ...inlineEdit, value: e.target.value })}
+              onBlur={() => handleInlineSave(param.id, 'mean', inlineEdit.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleInlineSave(param.id, 'mean', inlineEdit.value);
+                if (e.key === 'Escape') setInlineEdit(null);
+              }}
+              className="w-20 px-1.5 py-0.5 border border-gray-405 rounded text-center text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#5D6D5F] font-mono font-bold"
+            />
+          ) : (
+            <div
+              onDoubleClick={() => setInlineEdit({ id: param.id, field: 'mean', value: String(param.mean) })}
+              className="cursor-pointer hover:bg-slate-100 px-1 py-1 rounded border border-dashed border-transparent hover:border-gray-300 transition-all select-none font-bold"
+              title="双击编辑"
+            >
+              {param.mean}
+            </div>
+          )}
+        </td>
+        {/* Qc.cv */}
+        <td className="py-4 px-2 text-center text-slate-650 font-mono">
+          {isBatchEditing ? (
+            <div className="flex items-center justify-center gap-0.5">
+              <input
+                type="number"
+                step="any"
+                value={param.qcCV !== undefined ? param.qcCV : ''}
+                onChange={(e) => handleBatchFieldChange(param.id, 'qcCV', e.target.value)}
+                className="w-14 px-1 py-0.5 border border-gray-300 rounded text-center text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#5D6D5F] font-mono"
+              />
+              <span className="text-[10px] text-gray-500">%</span>
+            </div>
+          ) : inlineEdit?.id === param.id && inlineEdit?.field === 'qcCV' ? (
+            <div className="flex items-center justify-center gap-0.5">
+              <input
+                type="number"
+                step="any"
+                autoFocus
+                value={inlineEdit.value}
+                onChange={(e) => setInlineEdit({ ...inlineEdit, value: e.target.value })}
+                onBlur={() => handleInlineSave(param.id, 'qcCV', inlineEdit.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleInlineSave(param.id, 'qcCV', inlineEdit.value);
+                  if (e.key === 'Escape') setInlineEdit(null);
+                }}
+                className="w-14 px-1 py-0.5 border border-gray-400 rounded text-center text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#5D6D5F] font-mono"
+              />
+              <span className="text-[10px] text-gray-500">%</span>
+            </div>
+          ) : (
+            <div
+              onDoubleClick={() => setInlineEdit({ id: param.id, field: 'qcCV', value: String(param.qcCV) })}
+              className="cursor-pointer hover:bg-slate-100 px-1 py-1 rounded border border-dashed border-transparent hover:border-gray-300 transition-all select-none"
+              title="双击编辑"
+            >
+              {param.qcCV}%
+            </div>
+          )}
+        </td>
+        {/* Cal.cv */}
+        <td className="py-4 px-2 text-center text-slate-650 font-mono">
+          {isBatchEditing ? (
+            <div className="flex items-center justify-center gap-0.5">
+              <input
+                type="number"
+                step="any"
+                value={param.calCV !== undefined ? param.calCV : ''}
+                onChange={(e) => handleBatchFieldChange(param.id, 'calCV', e.target.value)}
+                className="w-14 px-1 py-0.5 border border-gray-300 rounded text-center text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#5D6D5F] font-mono"
+              />
+              <span className="text-[10px] text-gray-500">%</span>
+            </div>
+          ) : inlineEdit?.id === param.id && inlineEdit?.field === 'calCV' ? (
+            <div className="flex items-center justify-center gap-0.5">
+              <input
+                type="number"
+                step="any"
+                autoFocus
+                value={inlineEdit.value}
+                onChange={(e) => setInlineEdit({ ...inlineEdit, value: e.target.value })}
+                onBlur={() => handleInlineSave(param.id, 'calCV', inlineEdit.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleInlineSave(param.id, 'calCV', inlineEdit.value);
+                  if (e.key === 'Escape') setInlineEdit(null);
+                }}
+                className="w-14 px-1 py-0.5 border border-gray-400 rounded text-center text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#5D6D5F] font-mono"
+              />
+              <span className="text-[10px] text-gray-500">%</span>
+            </div>
+          ) : (
+            <div
+              onDoubleClick={() => setInlineEdit({ id: param.id, field: 'calCV', value: String(param.calCV) })}
+              className="cursor-pointer hover:bg-slate-100 px-1 py-1 rounded border border-dashed border-transparent hover:border-gray-300 transition-all select-none"
+              title="双击编辑"
+            >
+              {param.calCV}%
+            </div>
+          )}
+        </td>
+        {/* TEa */}
+        <td className="py-4 px-2 text-center text-slate-650 font-mono">
+          {isBatchEditing ? (
+            <div className="flex items-center justify-center gap-0.5">
+              <input
+                type="number"
+                step="any"
+                value={param.tea !== undefined ? param.tea : ''}
+                onChange={(e) => handleBatchFieldChange(param.id, 'tea', e.target.value)}
+                className="w-14 px-1 py-0.5 border border-gray-300 rounded text-center text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#5D6D5F] font-mono"
+              />
+              <span className="text-[10px] text-gray-500">%</span>
+            </div>
+          ) : inlineEdit?.id === param.id && inlineEdit?.field === 'tea' ? (
+            <div className="flex items-center justify-center gap-0.5">
+              <input
+                type="number"
+                step="any"
+                autoFocus
+                value={inlineEdit.value}
+                onChange={(e) => setInlineEdit({ ...inlineEdit, value: e.target.value })}
+                onBlur={() => handleInlineSave(param.id, 'tea', inlineEdit.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleInlineSave(param.id, 'tea', inlineEdit.value);
+                  if (e.key === 'Escape') setInlineEdit(null);
+                }}
+                className="w-14 px-1 py-0.5 border border-gray-405 rounded text-center text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#5D6D5F] font-mono"
+              />
+              <span className="text-[10px] text-gray-550">%</span>
+            </div>
+          ) : (
+            <div
+              onDoubleClick={() => setInlineEdit({ id: param.id, field: 'tea', value: String(param.tea) })}
+              className="cursor-pointer hover:bg-slate-100 px-1 py-1 rounded border border-dashed border-transparent hover:border-gray-300 transition-all select-none"
+              title="双击编辑"
+            >
+              {param.tea}%
+            </div>
+          )}
+        </td>
+        {/* K */}
+        <td className="py-4 px-2 text-center text-slate-400 font-mono">
+          {isBatchEditing ? (
+            <input
+              type="number"
+              step="any"
+              value={param.k !== undefined ? param.k : ''}
+              onChange={(e) => handleBatchFieldChange(param.id, 'k', e.target.value)}
+              className="w-12 px-1 py-0.5 border border-gray-300 rounded text-center text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#5D6D5F] font-mono"
+            />
+          ) : inlineEdit?.id === param.id && inlineEdit?.field === 'k' ? (
+            <input
+              type="number"
+              step="any"
+              autoFocus
+              value={inlineEdit.value}
+              onChange={(e) => setInlineEdit({ ...inlineEdit, value: e.target.value })}
+              onBlur={() => handleInlineSave(param.id, 'k', inlineEdit.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleInlineSave(param.id, 'k', inlineEdit.value);
+                if (e.key === 'Escape') setInlineEdit(null);
+              }}
+              className="w-12 px-1 py-0.5 border border-gray-400 rounded text-center text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#5D6D5F] font-mono"
+            />
+          ) : (
+            <div
+              onDoubleClick={() => setInlineEdit({ id: param.id, field: 'k', value: String(param.k) })}
+              className="cursor-pointer hover:bg-slate-100 px-1 py-1 rounded border border-dashed border-transparent hover:border-gray-300 transition-all select-none"
+              title="双击编辑"
+            >
+              {param.k}
+            </div>
+          )}
+        </td>
+        {/* Cal.cv平方 */}
+        <td className="py-4 px-2 text-center bg-[#FAF9F6]/20 text-slate-400 font-mono">
+          {param.calCVSquared}
+        </td>
+        {/* QC.cv平方 */}
+        <td className="py-4 px-2 text-center bg-[#FAF9F6]/20 text-slate-400 font-mono">
+          {param.qcCVSquared}
+        </td>
+        {/* Cal.cv平方+QC.cv平方 */}
+        <td className="py-4 px-2 text-center bg-[#F2EFE9] text-slate-800 font-bold font-mono">
+          {param.sumCVSquared}
+        </td>
+        {/* 合成相对UC */}
+        <td className="py-4 px-2 text-center bg-[#e7ece8]/40 text-[#49564b] font-bold font-mono">
+          {param.combinedUC}%
+        </td>
+        {/* 扩展相对UC */}
+        <td className="py-4 px-2 text-center bg-[#e7ece8] text-[#3c473e] font-bold font-mono">
+          {param.expandedUC}%
+        </td>
+        {/* 达标状态 */}
+        <td className="py-4 px-2 text-center">
+          <span
+            className={`inline-block px-2 py-0.5 rounded-sm font-mono font-bold text-[10px] ${
+              param.complianceStatus.includes('< 1/2')
+                ? 'bg-emerald-100 text-[#1B5E20]'
+                : param.complianceStatus.includes('<')
+                ? 'bg-[#FFF3E0] text-[#E65100]'
+                : 'bg-rose-105 text-rose-800 animate-pulse'
+            }`}
+          >
+            {param.complianceStatus}
+          </span>
+        </td>
+        {/* 评判 */}
+        <td className="py-4 px-2 text-center">
+          <span
+            className={`inline-block px-2.5 py-0.5 rounded-sm text-[10px] font-semibold ${
+              isSuccess
+                ? 'bg-[#5D6D5F] text-white'
+                : 'bg-rose-800 text-white animate-pulse'
+            }`}
+          >
+            {param.evaluation}
+          </span>
+        </td>
+        {/* Actions */}
+        <td className="py-4 px-3 text-right">
+          <div className="flex items-center justify-end gap-1">
+            <button
+              id={`btn-add-level-param-${param.id}`}
+              onClick={() => handleQuickAddLevel(param)}
+              title="快速增加新水平"
+              className="p-1 px-1.5 text-[#5D6D5F] hover:text-white hover:bg-[#5D6D5F] border border-[#5D6D5F]/30 hover:border-transparent rounded-sm transition-all cursor-pointer text-[10px]"
+            >
+              增加
+            </button>
+            <button
+              id={`btn-edit-param-${param.id}`}
+              onClick={() => handleOpenEdit(param)}
+              title="修改参数"
+              className="p-1 px-1.5 text-slate-600 hover:text-white hover:bg-[#5D6D5F] border border-black/10 rounded-sm transition-all cursor-pointer text-[10px]"
+            >
+              编辑
+            </button>
+            <button
+              id={`btn-delete-param-${param.id}`}
+              onClick={() => handleDelete(param.id, proj?.code || '未知项目', param.level)}
+              title="删除参数"
+              className="p-1 px-1.5 text-rose-700 hover:text-white hover:bg-rose-800 border border-black/10 rounded-sm transition-all cursor-pointer text-[10px]"
+            >
+              删除
+            </button>
+          </div>
+        </td>
+      </tr>
+    );
+  };
+
   // Calculate live preview for modal
   const getLivePreview = () => {
     if (!currentParam) return null;
@@ -580,20 +1001,37 @@ export default function ParameterConfig({
   return (
     <div id="parameter-config-container" className="space-y-6">
       {/* Description card - Editorial Style */}
-      <div className="bg-[#F2EFE9] border border-black/5 p-6 rounded-sm flex items-start gap-4">
-        <AlertCircle className="h-5 w-5 text-[#5D6D5F] mt-0.5 shrink-0" />
-        <div className="text-xs text-slate-800 leading-relaxed">
-          <p className="font-serif font-bold text-slate-900 text-sm mb-1.5 uppercase tracking-wider">
-            不确定度合成评定说明与标准公式 (ISO 15189)
-          </p>
-          <ul className="list-disc list-inside space-y-1.5 text-slate-700 font-serif italic">
-            <li><strong>校准品偏差平方 (Cal.cv²)：</strong> <code>{"Cal.cv * Cal.cv"}</code></li>
-            <li><strong>室内质控不精密度平方 (QC.cv²)：</strong> <code>{"Qc.cv * Qc.cv"}</code></li>
-            <li><strong>合成相对标准不确定度 (Uc)：</strong> <code>{"√ (Cal.cv² + QC.cv²)"}</code></li>
-            <li><strong>扩展相对标准不确定度 (U)：</strong> <code>{"合成相对UC * K"} (通常采用 K = 2)</code></li>
-            <li><strong>国际金标准评判级别：</strong> {"高度契合 (≤ 1/2 TEa)"} | {"合格/接收 (≤ 100% TEa)"} | {"未达标 (超过规定的允许偏差)"}</li>
-          </ul>
+      <div className="bg-[#F2EFE9] border border-black/5 p-5 rounded-sm space-y-3.5 shadow-2xs">
+        <div 
+          onClick={() => setIsGuideCollapsed(!isGuideCollapsed)} 
+          className="flex items-center justify-between cursor-pointer select-none pb-0.5"
+        >
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-4.5 w-4.5 text-[#5D6D5F] shrink-0" />
+            <span className="font-serif font-bold text-slate-900 text-sm uppercase tracking-wider">
+              不确定度合成评定说明与标准公式 (ISO 15189)
+            </span>
+          </div>
+          <button
+            type="button"
+            className="p-1 hover:bg-black/5 rounded transition-all text-slate-600 focus:outline-none cursor-pointer"
+            title={isGuideCollapsed ? "展开说明" : "折叠说明"}
+          >
+            {isGuideCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+          </button>
         </div>
+        
+        {!isGuideCollapsed && (
+          <div className="text-xs text-slate-800 leading-relaxed pl-6">
+            <ul className="list-disc list-inside space-y-1.5 text-slate-700 font-serif italic">
+              <li><strong>校准品偏差平方 (Cal.cv²)：</strong> <code>{"Cal.cv * Cal.cv"}</code></li>
+              <li><strong>室内质控不精密度平方 (QC.cv²)：</strong> <code>{"Qc.cv * Qc.cv"}</code></li>
+              <li><strong>合成相对标准不确定度 (Uc)：</strong> <code>{"√ (Cal.cv² + QC.cv²)"}</code></li>
+              <li><strong>扩展相对标准不确定度 (U)：</strong> <code>{"合成相对UC * K"} (通常采用 K = 2)</code></li>
+              <li><strong>国际金标准评判级别：</strong> {"高度契合 (≤ 1/2 TEa)"} | {"合格/接收 (≤ 100% TEa)"} | {"未达标 (超过规定的允许偏差)"}</li>
+            </ul>
+          </div>
+        )}
       </div>
 
       {/* Action panel - Editorial Style */}
@@ -670,7 +1108,6 @@ export default function ParameterConfig({
         </div>
       </div>
 
-      {/* Success tips or instructions */}
       {successTip && (
         <div className="bg-emerald-50 border border-emerald-250 text-emerald-800 text-xs px-4 py-3 rounded-xs flex items-center justify-between shadow-xs animate-fade-in select-none">
           <div className="flex items-center gap-2">
@@ -692,6 +1129,86 @@ export default function ParameterConfig({
         <div className="flex items-center gap-1.5 text-[11px] text-zinc-700 bg-zinc-50 px-4 py-2 border border-zinc-200 rounded-xs animate-pulse select-none">
           <span className="font-semibold text-zinc-800">✍️ 批量编辑中:</span>
           <span>您可以直接修改下方列中各水平对应的输入框，修改完成后记得点击右上角「保存批量修改」保存您的内容！</span>
+        </div>
+      )}
+      {projects.length > 0 && (
+        <div className="bg-[#FAF9F6] p-4.5 rounded-sm border border-black/5 space-y-4 shadow-3xs animate-fade-in">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            {/* Left: Quick instruments filters */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider mr-1">仪器快速筛选:</span>
+              <button
+                type="button"
+                onClick={() => setSelectedInstrument(null)}
+                className={`px-3 py-1 text-xs font-semibold rounded-full border transition-all cursor-pointer ${
+                  selectedInstrument === null
+                    ? 'bg-[#5D6D5F] text-white border-transparent shadow-2xs'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                全部项目 ({parameters.length})
+              </button>
+              {uniqueInstruments.map((inst) => {
+                const isSelected = selectedInstrument?.toLowerCase() === inst.toLowerCase();
+                const label = inst;
+                
+                // Count filtered parameters for this instrument
+                const count = parameters.filter((param) => {
+                  const p = projects.find((pr) => pr.id === param.projectId);
+                  return (p?.instrument || '').trim().toLowerCase() === inst.toLowerCase();
+                }).length;
+
+                return (
+                  <button
+                    key={inst}
+                    type="button"
+                    onClick={() => setSelectedInstrument(inst)}
+                    className={`px-3 py-1 text-xs font-semibold rounded-full border transition-all cursor-pointer flex items-center gap-1.5 ${
+                      isSelected
+                        ? 'bg-[#5D6D5F] text-white border-transparent shadow-2xs'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <span>{label}</span>
+                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                      isSelected ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'
+                    }`}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Right: Group-by Display Toggles */}
+            <div className="flex items-center gap-2.5 border-t md:border-t-0 pt-3 md:pt-0 border-slate-200/50">
+              <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">显示模式:</span>
+              <div className="flex bg-slate-200/55 p-0.5 rounded border border-black/5">
+                <button
+                  type="button"
+                  onClick={() => setGroupByInstrument(false)}
+                  className={`px-3 py-1 rounded text-xs font-bold transition-all cursor-pointer ${
+                    !groupByInstrument
+                      ? 'bg-white text-[#5D6D5F] shadow-3xs'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  平铺列表
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGroupByInstrument(true)}
+                  className={`px-3 py-1 rounded text-xs font-bold transition-all cursor-pointer ${
+                    groupByInstrument
+                      ? 'bg-white text-[#5D6D5F] shadow-3xs'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  按仪器分组
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -721,363 +1238,37 @@ export default function ParameterConfig({
               </tr>
             </thead>
             <tbody className="divide-y divide-black/5">
-              {calculatedList.length === 0 ? (
+              {filteredCalculatedList.length === 0 ? (
                 <tr>
                   <td colSpan={17} className="py-16 text-center text-gray-400 text-sm">
-                    暂未配置检测项目的水平参数，点击右上方“配置项目参数浓度”开始进行快速计算。
+                    {selectedInstrument ? '该仪器下暂无配置任何检测项目浓度参数' : '暂未配置检测项目的水平参数，点击右上方“配置项目参数浓度”开始进行快速计算。'}
                   </td>
                 </tr>
+              ) : !groupByInstrument ? (
+                filteredCalculatedList.map((param) => renderRow(param))
               ) : (
-                calculatedList.map((param) => {
-                  const proj = projects.find((p) => p.id === param.projectId);
-                  const isSuccess = param.evaluation === '达到要求';
+                Object.keys(groupedCalculatedList).map((instName) => {
+                  const groupParams = groupedCalculatedList[instName];
+                  if (groupParams.length === 0) return null;
+                  const instMatch = dictInstruments.find((di) => di.code.toLowerCase() === instName.toLowerCase() || di.name.toLowerCase() === instName.toLowerCase());
+                  const labelName = instMatch ? instMatch.name : instName;
                   return (
-                    <tr key={param.id} className="hover:bg-[#FAF9F6] transition-colors border-b border-black/5">
-                      {/* Project Code */}
-                      <td className="py-4 px-3 font-semibold text-slate-900">
-                        <div className="flex flex-col">
-                          <span className="font-mono text-sm font-bold text-slate-800">
-                            {proj ? `${proj.code}${proj.instrument ? `-${proj.instrument}` : ''}` : '未知'}
-                          </span>
-                          <span className="text-[10px] text-slate-400 font-serif italic max-w-[110px] truncate" title={proj?.name}>
-                            {proj?.name || ''}
-                          </span>
-                        </div>
-                      </td>
-                      {/* Unit */}
-                      <td className="py-4 px-2 text-center text-slate-600 font-mono text-xs">
-                        {param.unit}
-                      </td>
-                      {/* Level */}
-                      <td className="py-4 px-2 text-center text-xs">
-                        {isBatchEditing ? (
-                          <input
-                            type="text"
-                            value={param.level || ''}
-                            onChange={(e) => handleBatchFieldChange(param.id, 'level', e.target.value)}
-                            className="w-14 px-1.5 py-0.5 border border-gray-300 rounded text-center text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#5D6D5F] font-mono font-bold"
-                          />
-                        ) : inlineEdit?.id === param.id && inlineEdit?.field === 'level' ? (
-                          <input
-                            type="text"
-                            autoFocus
-                            value={inlineEdit.value}
-                            onChange={(e) => setInlineEdit({ ...inlineEdit, value: e.target.value })}
-                            onBlur={() => handleInlineSave(param.id, 'level', inlineEdit.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') handleInlineSave(param.id, 'level', inlineEdit.value);
-                              if (e.key === 'Escape') setInlineEdit(null);
-                            }}
-                            className="w-14 px-1.5 py-0.5 border border-gray-400 rounded text-center text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#5D6D5F] font-mono font-bold"
-                          />
-                        ) : (
-                          <div
-                            onDoubleClick={() => setInlineEdit({ id: param.id, field: 'level', value: param.level || '' })}
-                            className="cursor-pointer hover:bg-slate-100 px-1 py-1 rounded border border-dashed border-transparent hover:border-gray-300 transition-all select-none inline-block font-mono font-bold"
-                            title="双击编辑"
-                          >
-                            <span className="bg-[#F2EFE9] text-slate-700 px-2 py-0.5 rounded-sm border border-black/5">
-                              L{param.level}
+                    <React.Fragment key={instName}>
+                      {/* Group Separator/Header Row Row */}
+                      <tr className="bg-[#FAF9F6] border-y border-black/5 select-none my-1">
+                        <td colSpan={17} className="py-2.5 px-3">
+                          <div className="flex items-center gap-2">
+                            <span className="font-sans text-xs font-bold text-slate-800 bg-[#EFECE6] px-2.5 py-1 rounded border border-black/5 tracking-wider">
+                              仪器代码/名称: {labelName}
+                            </span>
+                            <span className="text-[11px] text-slate-500 font-medium">
+                              (该仪器下包含 <span className="font-bold text-[#5D6D5F] font-mono">{groupParams.length}</span> 个浓度水平模型)
                             </span>
                           </div>
-                        )}
-                      </td>
-                      {/* Date Range */}
-                      <td className="py-4 px-3 text-center text-slate-450 font-mono text-[10px]">
-                        {isBatchEditing ? (
-                          <input
-                            type="text"
-                            value={param.dateRange || ''}
-                            onChange={(e) => handleBatchFieldChange(param.id, 'dateRange', e.target.value)}
-                            className="w-32 px-1.5 py-0.5 border border-gray-300 rounded text-center text-[10px] tracking-tight bg-white focus:outline-none focus:ring-1 focus:ring-[#5D6D5F] uppercase"
-                          />
-                        ) : inlineEdit?.id === param.id && inlineEdit?.field === 'dateRange' ? (
-                          <input
-                            type="text"
-                            autoFocus
-                            value={inlineEdit.value}
-                            onChange={(e) => setInlineEdit({ ...inlineEdit, value: e.target.value })}
-                            onBlur={() => handleInlineSave(param.id, 'dateRange', inlineEdit.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') handleInlineSave(param.id, 'dateRange', inlineEdit.value);
-                              if (e.key === 'Escape') setInlineEdit(null);
-                            }}
-                            className="w-32 px-1.5 py-0.5 border border-gray-400 rounded text-center text-[10px] tracking-tight bg-white focus:outline-none focus:ring-1 focus:ring-[#5D6D5F] uppercase"
-                          />
-                        ) : (
-                          <div
-                            onDoubleClick={() => setInlineEdit({ id: param.id, field: 'dateRange', value: param.dateRange || '' })}
-                            className="cursor-pointer hover:bg-slate-100 px-1 py-1 rounded border border-dashed border-transparent hover:border-gray-300 transition-all select-none"
-                            title="双击编辑"
-                          >
-                            {param.dateRange}
-                          </div>
-                        )}
-                      </td>
-                      {/* Mean */}
-                      <td className="py-4 px-2 text-center text-slate-900 font-bold font-mono">
-                        {isBatchEditing ? (
-                          <input
-                            type="number"
-                            step="any"
-                            value={param.mean !== undefined ? param.mean : ''}
-                            onChange={(e) => handleBatchFieldChange(param.id, 'mean', e.target.value)}
-                            className="w-20 px-1.5 py-0.5 border border-gray-300 rounded text-center text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#5D6D5F] font-mono font-bold"
-                          />
-                        ) : inlineEdit?.id === param.id && inlineEdit?.field === 'mean' ? (
-                          <input
-                            type="number"
-                            step="any"
-                            autoFocus
-                            value={inlineEdit.value}
-                            onChange={(e) => setInlineEdit({ ...inlineEdit, value: e.target.value })}
-                            onBlur={() => handleInlineSave(param.id, 'mean', inlineEdit.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') handleInlineSave(param.id, 'mean', inlineEdit.value);
-                              if (e.key === 'Escape') setInlineEdit(null);
-                            }}
-                            className="w-20 px-1.5 py-0.5 border border-gray-400 rounded text-center text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#5D6D5F] font-mono font-bold"
-                          />
-                        ) : (
-                          <div
-                            onDoubleClick={() => setInlineEdit({ id: param.id, field: 'mean', value: String(param.mean) })}
-                            className="cursor-pointer hover:bg-slate-100 px-1 py-1 rounded border border-dashed border-transparent hover:border-gray-305 transition-all select-none font-bold"
-                            title="双击编辑"
-                          >
-                            {param.mean}
-                          </div>
-                        )}
-                      </td>
-                      {/* Qc.cv */}
-                      <td className="py-4 px-2 text-center text-slate-650 font-mono">
-                        {isBatchEditing ? (
-                          <div className="flex items-center justify-center gap-0.5">
-                            <input
-                              type="number"
-                              step="any"
-                              value={param.qcCV !== undefined ? param.qcCV : ''}
-                              onChange={(e) => handleBatchFieldChange(param.id, 'qcCV', e.target.value)}
-                              className="w-14 px-1 py-0.5 border border-gray-300 rounded text-center text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#5D6D5F] font-mono"
-                            />
-                            <span className="text-[10px] text-gray-550">%</span>
-                          </div>
-                        ) : inlineEdit?.id === param.id && inlineEdit?.field === 'qcCV' ? (
-                          <div className="flex items-center justify-center gap-0.5">
-                            <input
-                              type="number"
-                              step="any"
-                              autoFocus
-                              value={inlineEdit.value}
-                              onChange={(e) => setInlineEdit({ ...inlineEdit, value: e.target.value })}
-                              onBlur={() => handleInlineSave(param.id, 'qcCV', inlineEdit.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') handleInlineSave(param.id, 'qcCV', inlineEdit.value);
-                                if (e.key === 'Escape') setInlineEdit(null);
-                              }}
-                              className="w-14 px-1 py-0.5 border border-gray-400 rounded text-center text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#5D6D5F] font-mono"
-                            />
-                            <span className="text-[10px] text-gray-550">%</span>
-                          </div>
-                        ) : (
-                          <div
-                            onDoubleClick={() => setInlineEdit({ id: param.id, field: 'qcCV', value: String(param.qcCV) })}
-                            className="cursor-pointer hover:bg-slate-100 px-1 py-1 rounded border border-dashed border-transparent hover:border-gray-300 transition-all select-none"
-                            title="双击编辑"
-                          >
-                            {param.qcCV}%
-                          </div>
-                        )}
-                      </td>
-                      {/* Cal.cv */}
-                      <td className="py-4 px-2 text-center text-slate-650 font-mono">
-                        {isBatchEditing ? (
-                          <div className="flex items-center justify-center gap-0.5">
-                            <input
-                              type="number"
-                              step="any"
-                              value={param.calCV !== undefined ? param.calCV : ''}
-                              onChange={(e) => handleBatchFieldChange(param.id, 'calCV', e.target.value)}
-                              className="w-14 px-1 py-0.5 border border-gray-300 rounded text-center text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#5D6D5F] font-mono"
-                            />
-                            <span className="text-[10px] text-gray-550">%</span>
-                          </div>
-                        ) : inlineEdit?.id === param.id && inlineEdit?.field === 'calCV' ? (
-                          <div className="flex items-center justify-center gap-0.5">
-                            <input
-                              type="number"
-                              step="any"
-                              autoFocus
-                              value={inlineEdit.value}
-                              onChange={(e) => setInlineEdit({ ...inlineEdit, value: e.target.value })}
-                              onBlur={() => handleInlineSave(param.id, 'calCV', inlineEdit.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') handleInlineSave(param.id, 'calCV', inlineEdit.value);
-                                if (e.key === 'Escape') setInlineEdit(null);
-                              }}
-                              className="w-14 px-1 py-0.5 border border-gray-400 rounded text-center text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#5D6D5F] font-mono"
-                            />
-                            <span className="text-[10px] text-gray-550">%</span>
-                          </div>
-                        ) : (
-                          <div
-                            onDoubleClick={() => setInlineEdit({ id: param.id, field: 'calCV', value: String(param.calCV) })}
-                            className="cursor-pointer hover:bg-slate-100 px-1 py-1 rounded border border-dashed border-transparent hover:border-gray-300 transition-all select-none"
-                            title="双击编辑"
-                          >
-                            {param.calCV}%
-                          </div>
-                        )}
-                      </td>
-                      {/* TEa */}
-                      <td className="py-4 px-2 text-center text-slate-650 font-mono">
-                        {isBatchEditing ? (
-                          <div className="flex items-center justify-center gap-0.5">
-                            <input
-                              type="number"
-                              step="any"
-                              value={param.tea !== undefined ? param.tea : ''}
-                              onChange={(e) => handleBatchFieldChange(param.id, 'tea', e.target.value)}
-                              className="w-14 px-1 py-0.5 border border-gray-300 rounded text-center text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#5D6D5F] font-mono"
-                            />
-                            <span className="text-[10px] text-gray-550">%</span>
-                          </div>
-                        ) : inlineEdit?.id === param.id && inlineEdit?.field === 'tea' ? (
-                          <div className="flex items-center justify-center gap-0.5">
-                            <input
-                              type="number"
-                              step="any"
-                              autoFocus
-                              value={inlineEdit.value}
-                              onChange={(e) => setInlineEdit({ ...inlineEdit, value: e.target.value })}
-                              onBlur={() => handleInlineSave(param.id, 'tea', inlineEdit.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') handleInlineSave(param.id, 'tea', inlineEdit.value);
-                                if (e.key === 'Escape') setInlineEdit(null);
-                              }}
-                              className="w-14 px-1 py-0.5 border border-gray-400 rounded text-center text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#5D6D5F] font-mono"
-                            />
-                            <span className="text-[10px] text-gray-550">%</span>
-                          </div>
-                        ) : (
-                          <div
-                            onDoubleClick={() => setInlineEdit({ id: param.id, field: 'tea', value: String(param.tea) })}
-                            className="cursor-pointer hover:bg-slate-100 px-1 py-1 rounded border border-dashed border-transparent hover:border-gray-300 transition-all select-none"
-                            title="双击编辑"
-                          >
-                            {param.tea}%
-                          </div>
-                        )}
-                      </td>
-                      {/* K */}
-                      <td className="py-4 px-2 text-center text-slate-400 font-mono">
-                        {isBatchEditing ? (
-                          <input
-                            type="number"
-                            step="any"
-                            value={param.k !== undefined ? param.k : ''}
-                            onChange={(e) => handleBatchFieldChange(param.id, 'k', e.target.value)}
-                            className="w-12 px-1 py-0.5 border border-gray-300 rounded text-center text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#5D6D5F] font-mono"
-                          />
-                        ) : inlineEdit?.id === param.id && inlineEdit?.field === 'k' ? (
-                          <input
-                            type="number"
-                            step="any"
-                            autoFocus
-                            value={inlineEdit.value}
-                            onChange={(e) => setInlineEdit({ ...inlineEdit, value: e.target.value })}
-                            onBlur={() => handleInlineSave(param.id, 'k', inlineEdit.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') handleInlineSave(param.id, 'k', inlineEdit.value);
-                              if (e.key === 'Escape') setInlineEdit(null);
-                            }}
-                            className="w-12 px-1 py-0.5 border border-gray-400 rounded text-center text-xs bg-white focus:outline-none focus:ring-1 focus:ring-[#5D6D5F] font-mono"
-                          />
-                        ) : (
-                          <div
-                            onDoubleClick={() => setInlineEdit({ id: param.id, field: 'k', value: String(param.k) })}
-                            className="cursor-pointer hover:bg-slate-100 px-1 py-1 rounded border border-dashed border-transparent hover:border-gray-300 transition-all select-none"
-                            title="双击编辑"
-                          >
-                            {param.k}
-                          </div>
-                        )}
-                      </td>
-                      {/* Cal.cv平方 */}
-                      <td className="py-4 px-2 text-center bg-[#FAF9F6]/20 text-slate-400 font-mono">
-                        {param.calCVSquared}
-                      </td>
-                      {/* QC.cv平方 */}
-                      <td className="py-4 px-2 text-center bg-[#FAF9F6]/20 text-slate-400 font-mono">
-                        {param.qcCVSquared}
-                      </td>
-                      {/* Cal.cv平方+QC.cv平方 */}
-                      <td className="py-4 px-2 text-center bg-[#F2EFE9] text-slate-800 font-bold font-mono">
-                        {param.sumCVSquared}
-                      </td>
-                      {/* 合成相对UC */}
-                      <td className="py-4 px-2 text-center bg-[#e7ece8]/40 text-[#49564b] font-bold font-mono">
-                        {param.combinedUC}%
-                      </td>
-                      {/* 扩展相对UC */}
-                      <td className="py-4 px-2 text-center bg-[#e7ece8] text-[#3c473e] font-bold font-mono">
-                        {param.expandedUC}%
-                      </td>
-                      {/* 达标状态 */}
-                      <td className="py-4 px-2 text-center">
-                        <span
-                          className={`inline-block px-2 py-0.5 rounded-sm font-mono font-bold text-[10px] ${
-                            param.complianceStatus.includes('< 1/2')
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : param.complianceStatus.includes('<')
-                              ? 'bg-amber-50 text-amber-800 border border-amber-200'
-                              : 'bg-rose-100 text-rose-800 animate-pulse'
-                          }`}
-                        >
-                          {param.complianceStatus}
-                        </span>
-                      </td>
-                      {/* 评判 */}
-                      <td className="py-4 px-2 text-center">
-                        <span
-                          className={`inline-block px-2.5 py-0.5 rounded-sm text-[10px] font-semibold ${
-                            isSuccess
-                              ? 'bg-[#5D6D5F] text-white'
-                              : 'bg-rose-800 text-white animate-pulse'
-                          }`}
-                        >
-                          {param.evaluation}
-                        </span>
-                      </td>
-                      {/* Actions */}
-                      <td className="py-4 px-3 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <button
-                            id={`btn-add-level-param-${param.id}`}
-                            onClick={() => handleQuickAddLevel(param)}
-                            title="快速增加新水平"
-                            className="p-1 px-1.5 text-[#5D6D5F] hover:text-white hover:bg-[#5D6D5F] border border-[#5D6D5F]/30 hover:border-transparent rounded-sm transition-all cursor-pointer text-[10px]"
-                          >
-                            增加
-                          </button>
-                          <button
-                            id={`btn-edit-param-${param.id}`}
-                            onClick={() => handleOpenEdit(param)}
-                            title="修改参数"
-                            className="p-1 px-1.5 text-slate-600 hover:text-white hover:bg-[#5D6D5F] border border-black/10 rounded-sm transition-all cursor-pointer text-[10px]"
-                          >
-                            编辑
-                          </button>
-                          <button
-                            id={`btn-delete-param-${param.id}`}
-                            onClick={() => handleDelete(param.id, proj?.code || '未知项目', param.level)}
-                            title="删除参数"
-                            className="p-1 px-1.5 text-rose-700 hover:text-white hover:bg-rose-800 border border-black/10 rounded-sm transition-all cursor-pointer text-[10px]"
-                          >
-                            删除
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
+                        </td>
+                      </tr>
+                      {groupParams.map((param) => renderRow(param))}
+                    </React.Fragment>
                   );
                 })
               )}

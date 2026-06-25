@@ -4,7 +4,7 @@
  */
 
 import React, { useRef } from 'react';
-import { Project, Parameter, CalculatedParameter } from '../types';
+import { Project, Parameter, CalculatedParameter, DictInstrument } from '../types';
 import { calculateParameter } from '../utils/calculations';
 import { Download, Copy, Printer, Check, ListChecks, FileSpreadsheet } from 'lucide-react';
 import { motion } from 'motion/react';
@@ -12,11 +12,21 @@ import { motion } from 'motion/react';
 interface ReportGeneratorProps {
   projects: Project[];
   parameters: Parameter[];
+  dictInstruments?: DictInstrument[];
 }
 
-export default function ReportGenerator({ projects, parameters }: ReportGeneratorProps) {
+export default function ReportGenerator({ projects, parameters, dictInstruments }: ReportGeneratorProps) {
   const tableRef = useRef<HTMLTableElement>(null);
   const [copied, setCopied] = React.useState(false);
+
+  // Helper to translate instrument code to dict label (detail description)
+  const getInstrumentLabel = (instCode: string): string => {
+    if (!instCode) return '-';
+    const found = dictInstruments?.find(
+      (di) => di.code.trim().toLowerCase() === instCode.trim().toLowerCase()
+    );
+    return found ? found.name : instCode;
+  };
 
   // Sort projects by project.code & instrument
   const sortedProjects = React.useMemo(() => {
@@ -54,9 +64,16 @@ export default function ReportGenerator({ projects, parameters }: ReportGenerato
 
   // Helper to get parameters grouped and calculated for a project
   const getProjectLevels = (projectId: string): CalculatedParameter[] => {
+    const proj = projects.find((p) => p.id === projectId);
     return parameters
       .filter((p) => p.projectId === projectId)
-      .map((p) => calculateParameter(p))
+      .map((p) => {
+        const calc = calculateParameter(p);
+        if (proj) {
+          calc.unit = proj.unit;
+        }
+        return calc;
+      })
       .sort((a, b) => {
         // Sort numerically if possible
         const levelA = Number(a.level);
@@ -263,7 +280,7 @@ export default function ReportGenerator({ projects, parameters }: ReportGenerato
         String(idx + 1),
         proj.name,
         proj.code,
-        proj.instrument,
+        getInstrumentLabel(proj.instrument),
         proj.method,
         proj.interference,
         proj.traceability,
@@ -411,7 +428,7 @@ export default function ReportGenerator({ projects, parameters }: ReportGenerato
 
                       {/* Instrument */}
                       <td className="py-4 px-3 text-slate-600 font-medium" style={{ border: '1px solid #e1e5e9' }}>
-                        {project.instrument || '-'}
+                        {getInstrumentLabel(project.instrument)}
                       </td>
 
                       {/* Method */}
